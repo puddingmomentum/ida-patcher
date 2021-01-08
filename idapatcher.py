@@ -59,7 +59,6 @@ class PatchRestoreForm(Form):
 r"""BUTTON YES* Restore
 BUTTON CANCEL Cancel
 Restore patch bytes
-
 Address        {strAddr}
 File offset    {strFpos}
 <:{strOrg}>
@@ -80,7 +79,6 @@ class PatchEditForm(Form):
     def __init__(self, addr_str, fpos_str, patch_str, org_str):
         Form.__init__(self,
 r"""Edit patch bytes
-
 Address        {strAddr}
 File offset    {strFpos}
 <:{strPatch}>
@@ -101,13 +99,11 @@ class PatchApplyForm(Form):
     def __init__(self, start_ea, end_ea, org_file, bkp_file):
         Form.__init__(self,
 r"""Apply patches to input file
-
 {FormChangeCb}
 <##Start EA   :{intStartEA}>
 <##End EA     :{intEndEA}>
 <##Input file :{orgFile}>
 <##Backup file:{bkpFile}>
-
 <##Create backup:{rBackup}>
 <##Restore original bytes:{rRestore}>{cGroup1}>
 """, {
@@ -147,7 +143,6 @@ class PatchFillForm(Form):
         Form.__init__(self,
 r"""BUTTON YES* Fill
 Fill bytes
-
 <##Start EA   :{intStartEA}>
 <##End EA     :{intEndEA}>
 <##Value      :{intPatch}>
@@ -167,16 +162,13 @@ class DataImportForm(Form):
         Form.__init__(self,
 r"""BUTTON YES* Import
 Import data
-
 {FormChangeCb}
 <##Start EA   :{intStartEA}>
 <##End EA     :{intEndEA}>
-
 Import type:                    Patching options:
 <hex string:{rHex}><##Trim to selection:{cSize}>{cGroup}>
 <string literal:{rString}>
 <binary file:{rFile}>{rGroup}>
-
 <:{strPatch}>
 <##Import BIN file:{impFile}>
 """, {        
@@ -309,13 +301,13 @@ class PatchView(Choose2):
         # Add new patch byte to the list
         else:
 
-            name = SegName(ea)
+            name = idc.SegName(ea)
 
-            if GetFunctionName(ea) or Name(ea):
-                name += ": %s" % GetFunctionName(ea) or Name(ea)
+            if idc.GetFunctionName(ea) or idc.Name(ea):
+                name += ": %s" % idc.GetFunctionName(ea) or idc.Name(ea)
 
 
-            comment = Comment(ea) or RptCmt(ea) or ""
+            comment = idc.Comment(ea) or idc.RptCmt(ea) or ""
             # DATA STORAGE FORMAT:      address, function / fpos, len,    patched byte(s), original byte(s), comments
             self.items.append(     ["%08X" % ea,            name, "1", "%02X" % patch_val, "%02X" % org_val, comment])
             self.items_data.append([         ea,            fpos,   1,        [patch_val],        [org_val], None]   )
@@ -504,6 +496,65 @@ class PatchView(Choose2):
 
     def OnActivate(self):
         self.refreshitems()
+class idapatchesViewHandler(idaapi.action_handler_t):
+    def __init__(self,obj):
+        self.parent = obj
+        idaapi.action_handler_t.__init__(self)
+    # Say hello when invoked.
+    def activate(self, ctx):
+        self.parent.show_patches_view()
+        return 1
+    # This action is always available.
+    def update(self, ctx):
+        return idaapi.AST_ENABLE_ALWAYS
+    
+class idapatchesShowEditHandler(idaapi.action_handler_t):
+    def __init__(self,obj):
+        idaapi.action_handler_t.__init__(self)
+        self.parent = obj
+    # Say hello when invoked.
+    def activate(self, ctx):
+        self.parent.show_edit_form()
+        return 1
+    # This action is always available.
+    def update(self, ctx):
+        return idaapi.AST_ENABLE_ALWAYS
+    
+class idapatchesShowFillHandler(idaapi.action_handler_t):
+    def __init__(self,obj):
+        idaapi.action_handler_t.__init__(self)
+        self.parent = obj
+    # Say hello when invoked.
+    def activate(self, ctx):
+        self.parent.show_fill_form()
+        return 1
+    # This action is always available.
+    def update(self, ctx):
+        return idaapi.AST_ENABLE_ALWAYS
+
+class idapatchesShowImportHandler(idaapi.action_handler_t):
+    def __init__(self,obj):
+        idaapi.action_handler_t.__init__(self)
+        self.parent = obj
+    # Say hello when invoked.
+    def activate(self, ctx):
+        self.parent.show_import_form()
+        return 1
+    # This action is always available.
+    def update(self, ctx):
+        return idaapi.AST_ENABLE_ALWAYS
+        
+class idapatchesNOPHandler(idaapi.action_handler_t):
+    def __init__(self,obj):
+        idaapi.action_handler_t.__init__(self)
+        self.parent = obj
+    # Say hello when invoked.
+    def activate(self, ctx):
+        self.parent.x86_nop_region()
+        return 1
+    # This action is always available.
+    def update(self, ctx):
+        return idaapi.AST_ENABLE_ALWAYS
 
 #--------------------------------------------------------------------------
 # Manager
@@ -512,34 +563,51 @@ class PatchManager():
     """ Class that manages GUI forms and patching methods of the plugin. """
     
     def __init__(self): 
-        self.addmenu_item_ctxs = list()
+        self.addmenu_item_ctxs = dict()
         self.patch_view = PatchView()
 
+
+        
     #--------------------------------------------------------------------------
     # Menu Items
     #--------------------------------------------------------------------------
-    def add_menu_item_helper(self, menupath, name, hotkey, flags, pyfunc, args):
-
+    def add_menu_item_helper(self, menupath, name, id, handler, icon):
+        
+        action_desc = idaapi.action_desc_t(
+        id,   # The action name. This acts like an ID and must be unique
+        name,   # The action text.
+        handler(self),   # The action handler.
+        "",
+        "",
+        199)           # Optional: the action icon (shows when in menus/toolbars)
+        idaapi.register_action(action_desc)
+    
         # add menu item and report on errors
-        addmenu_item_ctx = idaapi.add_menu_item(menupath, name, hotkey, flags, pyfunc, args)
+        addmenu_item_ctx = idaapi.attach_action_to_menu(menupath, id, icon)
         if addmenu_item_ctx is None:
             return 1
         else:
-            self.addmenu_item_ctxs.append(addmenu_item_ctx)
+            self.addmenu_item_ctxs[id] = name
             return 0
 
     def add_menu_items(self):
 
-        if self.add_menu_item_helper("View/Open subviews/Problems", "Patches", "", 1, self.show_patches_view, None): return 1
-        if self.add_menu_item_helper("Edit/Patch program/", "Edit selection...", "", 0, self.show_edit_form, None):  return 1
-        if self.add_menu_item_helper("Edit/Patch program/", "Fill selection...", "", 0, self.show_fill_form, None):  return 1
-        if self.add_menu_item_helper("Edit/Export data...", "Import data...", "Shift-I", 1, self.show_import_form, None):   return 1
+        #if self.add_menu_item_helper("View/Open subviews/Problems", "Patches", "", 1, self.show_patches_view, None): return 1
+        #if self.add_menu_item_helper("Edit/Patch program/", "Edit selection...", "", 0, self.show_edit_form, None):  return 1
+        #if self.add_menu_item_helper("Edit/Patch program/", "Fill selection...", "", 0, self.show_fill_form, None):  return 1
+        #if self.add_menu_item_helper("Edit/Export data...", "Import data...", "Shift-I", 1, self.show_import_form, None):         return 1
+        
+        if self.add_menu_item_helper("Edit/Patch program/", "Patch Edit", "patch:edit", idapatchesShowEditHandler, idaapi.SETMENU_APP):  return 1
+        if self.add_menu_item_helper("Edit/Patch program/", "Patch Fill", "patch:fill", idapatchesShowFillHandler, idaapi.SETMENU_APP):  return 1
+        if self.add_menu_item_helper("Edit/Patch program/", "Import...", "patch:import", idapatchesShowImportHandler, idaapi.SETMENU_APP):  return 1
+        if self.add_menu_item_helper("View/Open subviews/Problems", "Patches", "patch:view", idapatchesViewHandler, idaapi.SETMENU_APP):  return 1
+        if self.add_menu_item_helper("Edit/Patch program/", "NOP selection (x86)...", "patch:NOP", idapatchesNOPHandler, idaapi.SETMENU_APP):  return 1
 
         return 0
 
     def del_menu_items(self):
-        for addmenu_item_ctx in self.addmenu_item_ctxs:
-            idaapi.del_menu_item(addmenu_item_ctx)
+        for item in self.addmenu_item_ctxs:
+            idaapi.detach_action_from_menu(item[0], item[1])
 
     #--------------------------------------------------------------------------
     # View Callbacks
@@ -694,7 +762,22 @@ class PatchManager():
 
         # Dispose the form
         f.Free()
-       
+ 
+    def x86_nop_region(self):
+        selection, start_ea, end_ea = idaapi.read_selection()
+
+        if not selection:
+            start_ea = idaapi.get_screen_ea()
+            end_ea = start_ea + 1
+
+        fill_value = 0x90
+
+        for ea in range(start_ea, end_ea):
+            idaapi.patch_byte(ea, fill_value)
+
+        # Refresh all IDA views
+        self.patch_view.Refresh()
+        
 #--------------------------------------------------------------------------
 # Plugin
 #--------------------------------------------------------------------------
@@ -743,11 +826,15 @@ def idapatcher_main():
     if 'idapatcher_manager' in globals():
         idapatcher_manager.del_menu_items()
         del idapatcher_manager
+        print("Yee");
 
     idapatcher_manager = PatchManager()
     idapatcher_manager.add_menu_items()
+    print("UwU")
     idapatcher_manager.show_patches_view()
 
-if __name__ == '__main__':
-    #idapatcher_main()
-    pass
+#if __name__ == '__main__':
+#    idapatcher_main()
+#    pass
+
+#idapatcher_main()
